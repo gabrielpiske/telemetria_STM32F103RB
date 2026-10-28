@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>STM32F103RB + ADXL345 | Telemetria em Tempo Real</title>
+  <meta name="description" content="Monitoramento em tempo real dos eixos X, Y e Z do acelerômetro ADXL345 integrado ao STM32 Nucleo-F103RB via Web Serial API e transmissão remota via WebSockets." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+  <!-- Cliente MQTT over WebSockets para transmissão/visualização remota em tempo real de qualquer lugar -->
+  <script src="https://unpkg.com/mqtt@5.10.3/dist/mqtt.min.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- CABEÇALHO -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-badge">STM32</div>
+        <div>
+          <h1>Telemetria Acelerômetro ADXL345 <span class="mcu-tag">NUCLEO-F103RB</span></h1>
+          <p class="subtitle">Monitoramento Triaxial (X, Y, Z) via USB Serial (USART2) &amp; Transmissão Remota em Tempo Real</p>
+        </div>
+      </div>
+
+      <div class="status-cluster">
+        <div class="status-pill" id="connectionStatusPill" data-state="disconnected">
+          <span class="status-dot"></span>
+          <span id="connectionStatusText">Desconectado</span>
+        </div>
+        <div class="metric-chip" title="Taxa de atualização de pacotes">
+          <span class="chip-label">Taxa:</span>
+          <strong id="sampleRateValue">0.0 Hz</strong>
+        </div>
+        <div class="metric-chip" title="Total de leituras recebidas na sessão">
+          <span class="chip-label">Amostras:</span>
+          <strong id="sampleCountValue">0</strong>
+        </div>
+      </div>
+    </header>
+
+    <!-- PAINEL DE CONEXÃO (USB LOCAL + ACESSO REMOTO GLOBAL + SIMULADOR) -->
+    <section class="connection-grid">
+      <!-- Card 1: Conexão Direta Cabo USB (Web Serial API) -->
+      <div class="panel conn-card">
+        <div class="conn-card-header">
+          <span class="step-badge">MODO 1 · BANCADA LOCAL (USB)</span>
+          <h2>Conexão Direta STM32 (Web Serial)</h2>
+        </div>
+        <p class="conn-desc">
+          Conecte o cabo USB da placa <strong>Nucleo-F103RB (ST-LINK VCP)</strong> neste computador usando Chrome ou Edge.
+        </p>
+        <div class="conn-controls">
+          <label class="field-inline">
+            <span>Baud Rate</span>
+            <select id="baudRateSelect">
+              <option value="115200" selected>115200 bps (Padrão STM32)</option>
+              <option value="57600">57600 bps</option>
+              <option value="38400">38400 bps</option>
+              <option value="19200">19200 bps</option>
+              <option value="9600">9600 bps</option>
+            </select>
+          </label>
+          <button id="btnConnectSerial" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6m0 8v6M4.93 4.93l4.24 4.24m5.66 5.66l4.24 4.24M2 12h6m8 0h6M4.93 19.07l4.24-4.24m5.66-5.66l4.24-4.24"/></svg>
+            <span>Conectar STM32 (USB)</span>
+          </button>
+          <button id="btnSimulate" class="btn btn-secondary" title="Testar interface sem a placa física">
+            Modo Simulador
+          </button>
+        </div>
+        <div id="webSerialWarning" class="alert-banner hidden">
+          ⚠️ Seu navegador/dispositivo atual não suporta Web Serial API via cabo USB. Use o <strong>Modo 2 (Espectador Remoto)</strong> ao lado para assistir aos dados ao vivo pela internet, ou abra no Chrome/Edge no PC.
+        </div>
+      </div>
+
+      <!-- Card 2: Transmissão & Visualização Remota em Qualquer Lugar -->
+      <div class="panel conn-card">
+        <div class="conn-card-header">
+          <span class="step-badge badge-live">MODO 2 · ACESSO EM QUALQUER LUGAR (NUVEM LIVE)</span>
+          <h2>Transmissão &amp; Acesso Remoto em Tempo Real</h2>
+        </div>
+        <p class="conn-desc">
+          Quando o STM32 está conectado no PC da bancada, os dados são transmitidos para a sala abaixo. Qualquer pessoa em <strong>qualquer lugar (PC ou Celular)</strong> pode abrir o link e assistir em tempo real!
+        </p>
+        <div class="conn-controls">
+          <label class="field-inline room-field">
+            <span>Código da Sala</span>
+            <input type="text" id="roomInput" value="senai-stm32-f103rb" placeholder="ex: senai-bancada-01" />
+          </label>
+          <button id="btnWatchRemote" class="btn btn-accent">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+            <span>Assistir Sala Remota</span>
+          </button>
+          <button id="btnCopyShareLink" class="btn btn-outline" title="Copiar URL com o código da sala para enviar a qualquer pessoa">
+            Copiar Link Live
+          </button>
+        </div>
+        <div class="broadcast-row">
+          <label class="switch-label">
+            <input type="checkbox" id="chkAutoBroadcast" checked />
+            <span>Retransmitir automaticamente dados do USB/Simulador para esta Sala Live</span>
+          </label>
+          <span id="mqttStatusBadge" class="mqtt-badge">Relay: Pronto</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- CARDS DOS EIXOS X, Y, Z E MAGNITUDE -->
+    <section class="axes-grid">
+      <!-- EIXO X -->
+      <article class="panel axis-card axis-x">
+        <div class="axis-header">
+          <span class="axis-tag">EIXO X</span>
+          <span class="axis-sub" id="valXms2">0.00 m/s²</span>
+        </div>
+        <div class="axis-value-row">
+          <span class="axis-number" id="valXg">0.00</span>
+          <span class="axis-unit">g</span>
+        </div>
+        <div class="gauge-track">
+          <div class="gauge-center-mark"></div>
+          <div class="gauge-fill" id="barX"></div>
+        </div>
+        <div class="gauge-scale">
+          <span>-4g</span>
+          <span>0g</span>
+          <span>+4g</span>
+        </div>
+      </article>
+
+      <!-- EIXO Y -->
+      <article class="panel axis-card axis-y">
+        <div class="axis-header">
+          <span class="axis-tag">EIXO Y</span>
+          <span class="axis-sub" id="valYms2">0.00 m/s²</span>
+        </div>
+        <div class="axis-value-row">
+          <span class="axis-number" id="valYg">0.00</span>
+          <span class="axis-unit">g</span>
+        </div>
+        <div class="gauge-track">
+          <div class="gauge-center-mark"></div>
+          <div class="gauge-fill" id="barY"></div>
+        </div>
+        <div class="gauge-scale">
+          <span>-4g</span>
+          <span>0g</span>
+          <span>+4g</span>
+        </div>
+      </article>
+
+      <!-- EIXO Z -->
+      <article class="panel axis-card axis-z">
+        <div class="axis-header">
+          <span class="axis-tag">EIXO Z</span>
+          <span class="axis-sub" id="valZms2">0.00 m/s²</span>
+        </div>
+        <div class="axis-value-row">
+          <span class="axis-number" id="valZg">0.00</span>
+          <span class="axis-unit">g</span>
+        </div>
+        <div class="gauge-track">
+          <div class="gauge-center-mark"></div>
+          <div class="gauge-fill" id="barZ"></div>
+        </div>
+        <div class="gauge-scale">
+          <span>-4g</span>
+          <span>0g</span>
+          <span>+4g</span>
+        </div>
+      </article>
+
+      <!-- VETOR RESULTANTE & INCLINAÇÃO -->
+      <article class="panel axis-card axis-mag">
+        <div class="axis-header">
+          <span class="axis-tag">VETOR RESULTANTE |a|</span>
+          <span class="axis-sub" id="valMagMs2">0.00 m/s²</span>
+        </div>
+        <div class="axis-value-row">
+          <span class="axis-number" id="valMagG">0.00</span>
+          <span class="axis-unit">g</span>
+        </div>
+        <div class="angles-mini-grid">
+          <div class="angle-box">
+            <span class="angle-label">PITCH (Arfagem)</span>
+            <strong id="valPitch">0.0°</strong>
+          </div>
+          <div class="angle-box">
+            <span class="angle-label">ROLL (Rolagem)</span>
+            <strong id="valRoll">0.0°</strong>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- SEÇÃO CENTRAL: ESPELHO DO LCD 16x2 FÍSICO + ORIENTAÇÃO 3D -->
+    <section class="visual-grid">
+      <!-- Réplica fiel do LCD 16x2 I2C HD44780 -->
+      <div class="panel lcd-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Espelho Virtual do Display LCD 16x2 (HD44780 I2C)</h2>
+            <p class="panel-subtitle">Exibe exatamente os cursores <code>(0,0)</code>, <code>(8,0)</code> e <code>(5,1)</code> configurados no <code>main.c</code></p>
+          </div>
+          <button id="btnToggleLcdColor" class="btn btn-sm btn-outline" title="Alternar cor do backlight do LCD">
+            Cor LCD: Azul/Verde
+          </button>
+        </div>
+
+        <div class="lcd-bezel">
+          <div class="lcd-screen" id="lcdScreen" data-theme="blue">
+            <div class="lcd-row" id="lcdRow0">x- 0.00 y- 0.00 </div>
+            <div class="lcd-row" id="lcdRow1">     z- 0.00    </div>
+          </div>
+          <div class="lcd-pins-caption">I2C1: PB8 (SCL) · PB9 (SDA) · ADXL345 @ 0xA6 (±4g)</div>
+        </div>
+
+        <div class="calibration-bar">
+          <button id="btnTare" class="btn btn-sm btn-secondary" title="Subtrair offset atual como zero de referência">
+            Calibrar / Tara (Zero)
+          </button>
+          <button id="btnResetTare" class="btn btn-sm btn-outline" title="Remover offset de calibração">
+            Limpar Tara
+          </button>
+          <span id="tareStatusText" class="tare-status">Sem offset aplicado (Leitura bruta do STM32)</span>
+        </div>
+      </div>
+
+      <!-- Visualização 3D da inclinação do módulo -->
+      <div class="panel cube-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Orientação Espacial 3D em Tempo Real</h2>
+            <p class="panel-subtitle">Inclinação calculada a partir do vetor gravitacional medido pelo ADXL345</p>
+          </div>
+        </div>
+
+        <div class="scene-3d">
+          <div class="board-3d" id="board3d">
+            <div class="board-face board-top">
+              <div class="chip-graphic">
+                <span>STM32F103RB</span>
+                <small>ADXL345</small>
+              </div>
+              <div class="axis-arrow arrow-x">+X →</div>
+              <div class="axis-arrow arrow-y">↓ +Y</div>
+            </div>
+            <div class="board-face board-bottom"></div>
+            <div class="board-face board-front"></div>
+            <div class="board-face board-back"></div>
+            <div class="board-face board-left"></div>
+            <div class="board-face board-right"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GRÁFICO OSCILOSCÓPIO EM TEMPO REAL -->
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Osciloscópio de Aceleração em Tempo Real (X, Y, Z)</h2>
+          <p class="panel-subtitle">Histórico temporal contínuo em unidades de gravidade (g)</p>
+        </div>
+        <div class="chart-controls">
+          <div class="legend-inline">
+            <span class="legend-item"><i class="dot dot-x"></i> Eixo X</span>
+            <span class="legend-item"><i class="dot dot-y"></i> Eixo Y</span>
+            <span class="legend-item"><i class="dot dot-z"></i> Eixo Z</span>
+          </div>
+          <label class="field-inline">
+            <span>Escala</span>
+            <select id="chartScaleSelect">
+              <option value="2">±2.0 g</option>
+              <option value="4" selected>±4.0 g (Padrão ADXL)</option>
+              <option value="8">±8.0 g</option>
+            </select>
+          </label>
+          <button id="btnPauseChart" class="btn btn-sm btn-outline">Pausar Gráfico</button>
+          <button id="btnClearChart" class="btn btn-sm btn-outline">Limpar</button>
+        </div>
+      </div>
+      <div class="canvas-wrapper">
+        <canvas id="telemetryCanvas" width="1100" height="280"></canvas>
+      </div>
+    </section>
+
+    <!-- MONITOR SERIAL INTEGRADO & EXPORTAÇÃO CSV -->
+    <section class="panel terminal-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Monitor Serial Bruto (USART2 / Pacotes Recebidos)</h2>
+          <p class="panel-subtitle">Aceita automaticamente <code>{"x":0.12,"y":-0.04,"z":0.98}</code>, CSV (<code>0.12,-0.04,0.98</code>) ou formato LCD</p>
+        </div>
+        <div class="terminal-actions">
+          <label class="switch-label">
+            <input type="checkbox" id="chkAutoScroll" checked />
+            <span>Auto-scroll</span>
+          </label>
+          <button id="btnExportCsv" class="btn btn-sm btn-primary">
+            Baixar Dados (.CSV)
+          </button>
+          <button id="btnClearLog" class="btn btn-sm btn-outline">
+            Limpar Console
+          </button>
+        </div>
+      </div>
+      <pre id="serialTerminal" class="serial-terminal">Aguardando conexão com o STM32F103RB via USB Serial (115200 bps) ou Sala Remota...</pre>
+    </section>
+
+    <footer class="footer">
+      <span>Projeto SENAI Eletrônica · STM32 Nucleo-F103RB + Acelerômetro ADXL345 (I2C1) + LCD 16x2</span>
+      <span>Pronto para hospedagem na Vercel (HTTPS + Web Serial API + WebSockets Live)</span>
+    </footer>
+  </div>
+</body>
+</html>

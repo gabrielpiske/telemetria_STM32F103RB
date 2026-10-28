@@ -1,0 +1,12 @@
+../Core/Src/main.c:65:6:ADXL_Write_Reg	1
+../Core/Src/main.c:70:6:ADXL_Read	1
+../Core/Src/main.c:75:6:ADXL_Init	2
+../Core/Src/main.c:89:6:display_data	1
+../Core/Src/main.c:100:6:UART2_Init	1
+../Core/Src/main.c:130:6:UART2_SendString	4
+../Core/Src/main.c:143:5:__io_putchar	2
+../Core/Src/main.c:155:5:main	1
+../Core/Src/main.c:253:6:SystemClock_Config	3
+../Core/Src/main.c:292:13:MX_I2C1_Init	2
+../Core/Src/main.c:326:13:MX_GPIO_Init	1
+../Core/Src/main.c:378:6:Error_Handler	1

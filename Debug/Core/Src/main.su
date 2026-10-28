@@ -1,0 +1,12 @@
+../Core/Src/main.c:65:6:ADXL_Write_Reg	32	static
+../Core/Src/main.c:70:6:ADXL_Read	40	static
+../Core/Src/main.c:75:6:ADXL_Init	16	static
+../Core/Src/main.c:89:6:display_data	40	static
+../Core/Src/main.c:100:6:UART2_Init	48	static
+../Core/Src/main.c:130:6:UART2_SendString	16	static
+../Core/Src/main.c:143:5:__io_putchar	16	static
+../Core/Src/main.c:155:5:main	120	static
+../Core/Src/main.c:253:6:SystemClock_Config	72	static
+../Core/Src/main.c:292:13:MX_I2C1_Init	8	static
+../Core/Src/main.c:326:13:MX_GPIO_Init	40	static
+../Core/Src/main.c:378:6:Error_Handler	4	static,ignoring_inline_asm
