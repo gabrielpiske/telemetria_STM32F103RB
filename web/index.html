@@ -3,112 +3,66 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>STM32F103RB + ADXL345 | Telemetria em Tempo Real</title>
-  <meta name="description" content="Monitoramento em tempo real dos eixos X, Y e Z do acelerômetro ADXL345 integrado ao STM32 Nucleo-F103RB via Web Serial API e transmissão remota via WebSockets." />
+  <meta name="author" content="Gabriel Piske - piske.online" />
+  <title>STM32F103RB + ADXL345 | Telemetria em Tempo Real | Gabriel Piske</title>
+  <meta name="description" content="Dashboard educativo em tempo real para o acelerômetro ADXL345 integrado ao STM32 Nucleo-F103RB via Web Serial API. Desenvolvido por Gabriel Piske (piske.online)." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
-  <!-- Cliente MQTT over WebSockets para transmissão/visualização remota em tempo real de qualquer lugar -->
-  <script src="https://unpkg.com/mqtt@5.10.3/dist/mqtt.min.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
   <div class="app-shell">
-    <!-- CABEÇALHO -->
+    <!-- CABEÇALHO COM CONTROLES DE CONEXÃO -->
     <header class="topbar">
       <div class="brand">
         <div class="brand-badge">STM32</div>
         <div>
           <h1>Telemetria Acelerômetro ADXL345 <span class="mcu-tag">NUCLEO-F103RB</span></h1>
-          <p class="subtitle">Monitoramento Triaxial (X, Y, Z) via USB Serial (USART2) &amp; Transmissão Remota em Tempo Real</p>
+          <p class="subtitle">Monitoramento Triaxial (X, Y, Z) em Tempo Real via Monitor Serial USB (USART2)</p>
         </div>
       </div>
 
-      <div class="status-cluster">
+      <div class="header-controls">
         <div class="status-pill" id="connectionStatusPill" data-state="disconnected">
           <span class="status-dot"></span>
           <span id="connectionStatusText">Desconectado</span>
         </div>
+
         <div class="metric-chip" title="Taxa de atualização de pacotes">
           <span class="chip-label">Taxa:</span>
           <strong id="sampleRateValue">0.0 Hz</strong>
         </div>
-        <div class="metric-chip" title="Total de leituras recebidas na sessão">
-          <span class="chip-label">Amostras:</span>
-          <strong id="sampleCountValue">0</strong>
-        </div>
+
+        <label class="baud-group" title="Taxa de transmissão serial configurada no STM32">
+          <span>Baud:</span>
+          <select id="baudRateSelect">
+            <option value="115200" selected>115200 bps</option>
+            <option value="57600">57600 bps</option>
+            <option value="38400">38400 bps</option>
+            <option value="19200">19200 bps</option>
+            <option value="9600">9600 bps</option>
+          </select>
+        </label>
+
+        <button id="btnConnectSerial" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6m0 8v6M4.93 4.93l4.24 4.24m5.66 5.66l4.24 4.24M2 12h6m8 0h6M4.93 19.07l4.24-4.24m5.66-5.66l4.24-4.24"/></svg>
+          <span>Conectar STM32 (USB)</span>
+        </button>
+
+        <button id="btnSimulate" class="btn btn-secondary" title="Simula leituras do acelerômetro para testes sem a placa física">
+          Modo Simulador
+        </button>
       </div>
     </header>
 
-    <!-- PAINEL DE CONEXÃO (USB LOCAL + ACESSO REMOTO GLOBAL + SIMULADOR) -->
-    <section class="connection-grid">
-      <!-- Card 1: Conexão Direta Cabo USB (Web Serial API) -->
-      <div class="panel conn-card">
-        <div class="conn-card-header">
-          <span class="step-badge">MODO 1 · BANCADA LOCAL (USB)</span>
-          <h2>Conexão Direta STM32 (Web Serial)</h2>
-        </div>
-        <p class="conn-desc">
-          Conecte o cabo USB da placa <strong>Nucleo-F103RB (ST-LINK VCP)</strong> neste computador usando Chrome ou Edge.
-        </p>
-        <div class="conn-controls">
-          <label class="field-inline">
-            <span>Baud Rate</span>
-            <select id="baudRateSelect">
-              <option value="115200" selected>115200 bps (Padrão STM32)</option>
-              <option value="57600">57600 bps</option>
-              <option value="38400">38400 bps</option>
-              <option value="19200">19200 bps</option>
-              <option value="9600">9600 bps</option>
-            </select>
-          </label>
-          <button id="btnConnectSerial" class="btn btn-primary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6m0 8v6M4.93 4.93l4.24 4.24m5.66 5.66l4.24 4.24M2 12h6m8 0h6M4.93 19.07l4.24-4.24m5.66-5.66l4.24-4.24"/></svg>
-            <span>Conectar STM32 (USB)</span>
-          </button>
-          <button id="btnSimulate" class="btn btn-secondary" title="Testar interface sem a placa física">
-            Modo Simulador
-          </button>
-        </div>
-        <div id="webSerialWarning" class="alert-banner hidden">
-          ⚠️ Seu navegador/dispositivo atual não suporta Web Serial API via cabo USB. Use o <strong>Modo 2 (Espectador Remoto)</strong> ao lado para assistir aos dados ao vivo pela internet, ou abra no Chrome/Edge no PC.
-        </div>
-      </div>
+    <!-- AVISO DE COMPATIBILIDADE WEB SERIAL API -->
+    <div id="webSerialWarning" class="alert-banner hidden">
+      ⚠️ <strong>Aviso da Web Serial API:</strong> Seu navegador atual não suporta conexão direta à porta Serial USB. Utilize o <strong>Google Chrome</strong>, <strong>Microsoft Edge</strong> ou <strong>Opera</strong> no computador, ou clique em <strong>Modo Simulador</strong> para testar a interface.
+    </div>
 
-      <!-- Card 2: Transmissão & Visualização Remota em Qualquer Lugar -->
-      <div class="panel conn-card">
-        <div class="conn-card-header">
-          <span class="step-badge badge-live">MODO 2 · ACESSO EM QUALQUER LUGAR (NUVEM LIVE)</span>
-          <h2>Transmissão &amp; Acesso Remoto em Tempo Real</h2>
-        </div>
-        <p class="conn-desc">
-          Quando o STM32 está conectado no PC da bancada, os dados são transmitidos para a sala abaixo. Qualquer pessoa em <strong>qualquer lugar (PC ou Celular)</strong> pode abrir o link e assistir em tempo real!
-        </p>
-        <div class="conn-controls">
-          <label class="field-inline room-field">
-            <span>Código da Sala</span>
-            <input type="text" id="roomInput" value="senai-stm32-f103rb" placeholder="ex: senai-bancada-01" />
-          </label>
-          <button id="btnWatchRemote" class="btn btn-accent">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
-            <span>Assistir Sala Remota</span>
-          </button>
-          <button id="btnCopyShareLink" class="btn btn-outline" title="Copiar URL com o código da sala para enviar a qualquer pessoa">
-            Copiar Link Live
-          </button>
-        </div>
-        <div class="broadcast-row">
-          <label class="switch-label">
-            <input type="checkbox" id="chkAutoBroadcast" checked />
-            <span>Retransmitir automaticamente dados do USB/Simulador para esta Sala Live</span>
-          </label>
-          <span id="mqttStatusBadge" class="mqtt-badge">Relay: Pronto</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- CARDS DOS EIXOS X, Y, Z E MAGNITUDE -->
+    <!-- CARDS DOS TRÊS EIXOS: X, Y e Z -->
     <section class="axes-grid">
       <!-- EIXO X -->
       <article class="panel axis-card axis-x">
@@ -172,28 +126,6 @@
           <span>+4g</span>
         </div>
       </article>
-
-      <!-- VETOR RESULTANTE & INCLINAÇÃO -->
-      <article class="panel axis-card axis-mag">
-        <div class="axis-header">
-          <span class="axis-tag">VETOR RESULTANTE |a|</span>
-          <span class="axis-sub" id="valMagMs2">0.00 m/s²</span>
-        </div>
-        <div class="axis-value-row">
-          <span class="axis-number" id="valMagG">0.00</span>
-          <span class="axis-unit">g</span>
-        </div>
-        <div class="angles-mini-grid">
-          <div class="angle-box">
-            <span class="angle-label">PITCH (Arfagem)</span>
-            <strong id="valPitch">0.0°</strong>
-          </div>
-          <div class="angle-box">
-            <span class="angle-label">ROLL (Rolagem)</span>
-            <strong id="valRoll">0.0°</strong>
-          </div>
-        </div>
-      </article>
     </section>
 
     <!-- SEÇÃO CENTRAL: ESPELHO DO LCD 16x2 FÍSICO + ORIENTAÇÃO 3D -->
@@ -234,7 +166,7 @@
         <div class="panel-header">
           <div>
             <h2>Orientação Espacial 3D em Tempo Real</h2>
-            <p class="panel-subtitle">Inclinação calculada a partir do vetor gravitacional medido pelo ADXL345</p>
+            <p class="panel-subtitle">Inclinação espacial do módulo calculada a partir dos eixos X, Y e Z</p>
           </div>
         </div>
 
@@ -272,11 +204,10 @@
             <span class="legend-item"><i class="dot dot-z"></i> Eixo Z</span>
           </div>
           <label class="field-inline">
-            <span>Escala</span>
-            <select id="chartScaleSelect">
-              <option value="2">±2.0 g</option>
-              <option value="4" selected>±4.0 g (Padrão ADXL)</option>
-              <option value="8">±8.0 g</option>
+            <select id="chartScaleSelect" aria-label="Escala do gráfico">
+              <option value="2">Escala ±2.0 g</option>
+              <option value="4" selected>Escala ±4.0 g (Padrão ADXL)</option>
+              <option value="8">Escala ±8.0 g</option>
             </select>
           </label>
           <button id="btnPauseChart" class="btn btn-sm btn-outline">Pausar Gráfico</button>
@@ -293,7 +224,7 @@
       <div class="panel-header">
         <div>
           <h2>Monitor Serial Bruto (USART2 / Pacotes Recebidos)</h2>
-          <p class="panel-subtitle">Aceita automaticamente <code>{"x":0.12,"y":-0.04,"z":0.98}</code>, CSV (<code>0.12,-0.04,0.98</code>) ou formato LCD</p>
+          <p class="panel-subtitle">Amostras recebidas: <strong id="sampleCountValue">0</strong> · Aceita <code>{"x":0.12,"y":-0.04,"z":0.98}</code>, CSV ou formato LCD</p>
         </div>
         <div class="terminal-actions">
           <label class="switch-label">
@@ -308,12 +239,49 @@
           </button>
         </div>
       </div>
-      <pre id="serialTerminal" class="serial-terminal">Aguardando conexão com o STM32F103RB via USB Serial (115200 bps) ou Sala Remota...</pre>
+      <pre id="serialTerminal" class="serial-terminal">Aguardando conexão com o STM32F103RB via Porta Serial USB (115200 bps)...</pre>
     </section>
 
-    <footer class="footer">
-      <span>Projeto SENAI Eletrônica · STM32 Nucleo-F103RB + Acelerômetro ADXL345 (I2C1) + LCD 16x2</span>
-      <span>Pronto para hospedagem na Vercel (HTTPS + Web Serial API + WebSockets Live)</span>
+    <!-- RODAPÉ EDUCATIVO & CRÉDITOS (PADRÃO PROJETOS SENAI / GABRIEL PISKE) -->
+    <footer class="educational-footer">
+      <div class="footer-top">
+        <div class="footer-brand-col">
+          <div class="footer-title-row">
+            <span class="senai-badge">SENAI</span>
+            <span class="footer-project-title">Plataforma Didática</span>
+          </div>
+          <p class="footer-project-desc">
+            Monitoramento Triaxial em Tempo Real com STM32 Nucleo-F103RB, Acelerômetro ADXL345 (I2C1) e Display LCD 16x2
+          </p>
+        </div>
+
+        <div class="footer-author-col">
+          <div class="author-line">
+            <span>Docente:</span>
+            <a href="https://piske.online" target="_blank" rel="noopener noreferrer" class="author-link">
+              Gabriel Piske
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </a>
+          </div>
+          <p class="author-role">
+            Docente de Eletrônica e Tecnologia, Desenvolvedor de Ferramentas e Softwares Educacionais
+          </p>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <span class="footer-meta-item">
+          <i class="meta-dot meta-emerald"></i> Comunicação Direta Web Serial API (USART2 @ 115200 bps)
+        </span>
+        <span class="footer-sep">•</span>
+        <span class="footer-meta-item">
+          <i class="meta-dot meta-blue"></i> Barramento I2C1 (ADXL345 + LCD HD44780)
+        </span>
+        <span class="footer-sep">•</span>
+        <a href="https://piske.online" target="_blank" rel="noopener noreferrer" class="portfolio-pill">
+          🌐 piske.online
+        </a>
+      </div>
     </footer>
   </div>
 </body>

@@ -1,9 +1,10 @@
 /**
  * Telemetria STM32F103RB + Acelerômetro ADXL345 + LCD 16x2 I2C
+ * Desenvolvido por Gabriel Piske (https://piske.online)
+ *
  * Suporta:
  *  1. Conexão Direta via Cabo USB (Web Serial API - USART2 @ 115200 bps)
- *  2. Transmissão e Visualização Remota em Qualquer Lugar (MQTT over WebSockets WSS)
- *  3. Modo Simulador Integrado
+ *  2. Modo Simulador Integrado para testes sem a placa física
  */
 
 (() => {
@@ -12,24 +13,19 @@
   const G_TO_MS2 = 9.80665;
   const MAX_HISTORY_POINTS = 220;
   const MAX_LOG_LINES = 180;
-  const MQTT_BROKER_URL = 'wss://broker.hivemq.com:8884/mqtt';
-  const MQTT_TOPIC_PREFIX = 'senai/stm32f103rb/adxl345/v1/';
 
   // Estado da Aplicação
   const state = {
-    mode: 'disconnected', // 'disconnected' | 'serial' | 'remote' | 'simulated'
+    mode: 'disconnected', // 'disconnected' | 'serial' | 'simulated'
     port: null,
     reader: null,
     keepReading: false,
     simInterval: null,
-    mqttClient: null,
-    mqttConnected: false,
-    subscribedTopic: null,
 
     // Última leitura bruta e calibrada (em g)
     raw: { x: 0, y: 0, z: 0 },
     tare: { x: 0, y: 0, z: 0, active: false },
-    current: { x: 0, y: 0, z: 0, mag: 0, pitch: 0, roll: 0 },
+    current: { x: 0, y: 0, z: 0, pitch: 0, roll: 0 },
 
     // Histórico do gráfico e gravação CSV
     history: [],
@@ -56,12 +52,6 @@
     btnSimulate: document.getElementById('btnSimulate'),
     webSerialWarning: document.getElementById('webSerialWarning'),
 
-    roomInput: document.getElementById('roomInput'),
-    btnWatchRemote: document.getElementById('btnWatchRemote'),
-    btnCopyShareLink: document.getElementById('btnCopyShareLink'),
-    chkAutoBroadcast: document.getElementById('chkAutoBroadcast'),
-    mqttStatusBadge: document.getElementById('mqttStatusBadge'),
-
     valXg: document.getElementById('valXg'),
     valYg: document.getElementById('valYg'),
     valZg: document.getElementById('valZg'),
@@ -71,11 +61,6 @@
     barX: document.getElementById('barX'),
     barY: document.getElementById('barY'),
     barZ: document.getElementById('barZ'),
-
-    valMagG: document.getElementById('valMagG'),
-    valMagMs2: document.getElementById('valMagMs2'),
-    valPitch: document.getElementById('valPitch'),
-    valRoll: document.getElementById('valRoll'),
 
     lcdScreen: document.getElementById('lcdScreen'),
     lcdRow0: document.getElementById('lcdRow0'),
@@ -156,7 +141,7 @@
   // =========================================================================
   // 2. PROCESSAMENTO MATEMÁTICO E ATUALIZAÇÃO DA INTERFACE
   // =========================================================================
-  function processSample(rawX, rawY, rawZ, sourceTag = 'UART') {
+  function processSample(rawX, rawY, rawZ) {
     state.raw.x = rawX;
     state.raw.y = rawY;
     state.raw.z = rawZ;
@@ -165,13 +150,11 @@
     const y = state.tare.active ? rawY - state.tare.y : rawY;
     const z = state.tare.active ? rawZ - state.tare.z : rawZ;
 
-    const mag = Math.sqrt(x * x + y * y + z * z);
-
-    // Cálculo de Roll e Pitch em graus
+    // Ângulos de inclinação para animar a Orientação Espacial 3D
     const roll = Math.atan2(y, z) * (180 / Math.PI);
     const pitch = Math.atan2(-x, Math.sqrt(y * y + z * z)) * (180 / Math.PI);
 
-    state.current = { x, y, z, mag, pitch, roll };
+    state.current = { x, y, z, pitch, roll };
     state.sampleCount++;
     state.samplesInWindow++;
 
@@ -190,19 +173,11 @@
         timestamp: nowIso,
         x: x.toFixed(3),
         y: y.toFixed(3),
-        z: z.toFixed(3),
-        mag: mag.toFixed(3),
-        pitch: pitch.toFixed(1),
-        roll: roll.toFixed(1)
+        z: z.toFixed(3)
       });
     }
 
     updateDashboardUI();
-
-    // Se for leitura local (Serial USB ou Simulador) e o broadcast estiver ativo, publica via WSS
-    if ((sourceTag === 'UART' || sourceTag === 'SIM') && el.chkAutoBroadcast.checked) {
-      publishLiveSample(x, y, z);
-    }
   }
 
   function updateGaugeBar(barElement, valueG, maxG = 4) {
@@ -235,7 +210,7 @@
   }
 
   function updateDashboardUI() {
-    const { x, y, z, mag, pitch, roll } = state.current;
+    const { x, y, z, pitch, roll } = state.current;
 
     el.valXg.textContent = x.toFixed(2);
     el.valYg.textContent = y.toFixed(2);
@@ -248,11 +223,6 @@
     updateGaugeBar(el.barX, x, state.chartScaleG);
     updateGaugeBar(el.barY, y, state.chartScaleG);
     updateGaugeBar(el.barZ, z, state.chartScaleG);
-
-    el.valMagG.textContent = mag.toFixed(2);
-    el.valMagMs2.textContent = `${(mag * G_TO_MS2).toFixed(2)} m/s²`;
-    el.valPitch.textContent = `${pitch.toFixed(1)}°`;
-    el.valRoll.textContent = `${roll.toFixed(1)}°`;
 
     // Atualiza o Espelho do LCD 16x2
     el.lcdRow0.textContent = formatLcdRow0(x, y);
@@ -283,7 +253,7 @@
   async function connectWebSerial() {
     if (!('serial' in navigator)) {
       el.webSerialWarning.classList.remove('hidden');
-      alert('Seu navegador não suporta a Web Serial API. Utilize Google Chrome ou Microsoft Edge no computador, ou use o botão "Assistir Sala Remota".');
+      alert('Seu navegador não suporta a Web Serial API. Utilize Google Chrome ou Microsoft Edge no computador, ou clique em "Modo Simulador".');
       return;
     }
 
@@ -309,9 +279,6 @@
       state.keepReading = true;
       setConnectionState('serial', `STM32 Conectado (${baudRate} bps)`);
       appendTerminalLog(`Porta Serial aberta em ${baudRate} bps (8N1). Aguardando dados da USART2...`);
-
-      // Garante que o cliente MQTT esteja ativo para retransmitir à nuvem se marcado
-      ensureMqttConnection();
 
       readSerialLoop(port);
     } catch (err) {
@@ -342,7 +309,7 @@
               appendTerminalLog(trimmed);
               const parsed = parseTelemetryLine(trimmed);
               if (parsed) {
-                processSample(parsed.x, parsed.y, parsed.z, 'UART');
+                processSample(parsed.x, parsed.y, parsed.z);
               }
             }
           }
@@ -377,114 +344,7 @@
   }
 
   // =========================================================================
-  // 4. TRANSMISSÃO E RECEPÇÃO REMOTA EM TEMPO REAL (MQTT OVER WEBSOCKETS)
-  // =========================================================================
-  function getCleanRoomTopic() {
-    const room = (el.roomInput.value || 'senai-stm32-f103rb')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]/g, '-');
-    return `${MQTT_TOPIC_PREFIX}${room}`;
-  }
-
-  function ensureMqttConnection(onConnectedCallback) {
-    if (typeof window.mqtt === 'undefined') {
-      el.mqttStatusBadge.textContent = 'Relay: Offline';
-      return;
-    }
-
-    if (state.mqttClient && state.mqttConnected) {
-      if (onConnectedCallback) onConnectedCallback();
-      return;
-    }
-
-    if (state.mqttClient) {
-      if (onConnectedCallback) {
-        state.mqttClient.once('connect', onConnectedCallback);
-      }
-      return;
-    }
-
-    el.mqttStatusBadge.textContent = 'Relay: Conectando...';
-    const clientId = `stm32_web_${Math.random().toString(16).slice(2, 10)}`;
-    const client = window.mqtt.connect(MQTT_BROKER_URL, {
-      clientId,
-      clean: true,
-      connectTimeout: 8000,
-      reconnectPeriod: 3000
-    });
-
-    state.mqttClient = client;
-
-    client.on('connect', () => {
-      state.mqttConnected = true;
-      el.mqttStatusBadge.textContent = 'Relay Nuvem: Online (WSS)';
-      if (onConnectedCallback) onConnectedCallback();
-    });
-
-    client.on('error', () => {
-      el.mqttStatusBadge.textContent = 'Relay: Erro de rede';
-    });
-
-    client.on('close', () => {
-      state.mqttConnected = false;
-      el.mqttStatusBadge.textContent = 'Relay: Reconectando...';
-    });
-
-    client.on('message', (topic, payload) => {
-      if (state.mode !== 'remote' || topic !== state.subscribedTopic) return;
-      const msgStr = payload.toString();
-      appendTerminalLog(`[LIVE REMOTO] ${msgStr}`);
-      const parsed = parseTelemetryLine(msgStr);
-      if (parsed) {
-        processSample(parsed.x, parsed.y, parsed.z, 'REMOTE');
-      }
-    });
-  }
-
-  function publishLiveSample(x, y, z) {
-    ensureMqttConnection();
-    if (!state.mqttClient || !state.mqttConnected) return;
-    const topic = getCleanRoomTopic();
-    const payload = JSON.stringify({
-      x: Number(x.toFixed(2)),
-      y: Number(y.toFixed(2)),
-      z: Number(z.toFixed(2)),
-      ts: Date.now()
-    });
-    state.mqttClient.publish(topic, payload, { qos: 0, retain: false });
-  }
-
-  async function toggleWatchRemoteRoom() {
-    if (state.mode === 'remote') {
-      await stopAllModes();
-      return;
-    }
-
-    await stopAllModes();
-    const topic = getCleanRoomTopic();
-    const roomName = el.roomInput.value.trim() || 'senai-stm32-f103rb';
-
-    setConnectionState('remote', `Assistindo Sala: ${roomName}`);
-    appendTerminalLog(`Conectando à Sala Remota "${roomName}" em tempo real via WebSockets...`);
-
-    ensureMqttConnection(() => {
-      if (state.subscribedTopic) {
-        state.mqttClient.unsubscribe(state.subscribedTopic);
-      }
-      state.mqttClient.subscribe(topic, { qos: 0 }, (err) => {
-        if (!err) {
-          state.subscribedTopic = topic;
-          appendTerminalLog(`Inscrito na sala "${roomName}". Recebendo leituras do STM32 em tempo real!`);
-        } else {
-          appendTerminalLog(`Falha ao entrar na sala remota: ${err.message}`);
-        }
-      });
-    });
-  }
-
-  // =========================================================================
-  // 5. MODO SIMULADOR (PARA TESTES SEM HARDWARE FÍSICO)
+  // 4. MODO SIMULADOR (PARA TESTES SEM HARDWARE FÍSICO)
   // =========================================================================
   async function toggleSimulator() {
     if (state.mode === 'simulated') {
@@ -495,7 +355,6 @@
     await stopAllModes();
     setConnectionState('simulated', 'Modo Simulador Ativo (10 Hz)');
     appendTerminalLog('Modo Simulador iniciado. Gerando pacotes JSON idênticos ao STM32F103RB...');
-    ensureMqttConnection();
 
     let t = 0;
     state.simInterval = setInterval(() => {
@@ -506,7 +365,7 @@
 
       const fakeJson = JSON.stringify({ x: simX, y: simY, z: simZ });
       appendTerminalLog(fakeJson);
-      processSample(simX, simY, simZ, 'SIM');
+      processSample(simX, simY, simZ);
     }, 100);
   }
 
@@ -514,12 +373,6 @@
     if (state.simInterval) {
       clearInterval(state.simInterval);
       state.simInterval = null;
-    }
-    if (state.subscribedTopic && state.mqttClient) {
-      try {
-        state.mqttClient.unsubscribe(state.subscribedTopic);
-      } catch (_) {}
-      state.subscribedTopic = null;
     }
     if (state.port) {
       await disconnectWebSerial();
@@ -535,31 +388,22 @@
       el.statusPill.dataset.state = 'connected';
       el.btnConnectSerial.innerHTML = '<span>Desconectar STM32 (USB)</span>';
       el.btnConnectSerial.classList.replace('btn-primary', 'btn-danger');
-      el.btnWatchRemote.textContent = 'Assistir Sala Remota';
-      el.btnSimulate.textContent = 'Modo Simulador';
-    } else if (mode === 'remote') {
-      el.statusPill.dataset.state = 'remote';
-      el.btnConnectSerial.innerHTML = '<span>Conectar STM32 (USB)</span>';
-      el.btnConnectSerial.classList.replace('btn-danger', 'btn-primary');
-      el.btnWatchRemote.textContent = 'Parar de Assistir Sala';
       el.btnSimulate.textContent = 'Modo Simulador';
     } else if (mode === 'simulated') {
       el.statusPill.dataset.state = 'simulated';
       el.btnConnectSerial.innerHTML = '<span>Conectar STM32 (USB)</span>';
       el.btnConnectSerial.classList.replace('btn-danger', 'btn-primary');
-      el.btnWatchRemote.textContent = 'Assistir Sala Remota';
       el.btnSimulate.textContent = 'Parar Simulador';
     } else {
       el.statusPill.dataset.state = 'disconnected';
       el.btnConnectSerial.innerHTML = '<span>Conectar STM32 (USB)</span>';
       el.btnConnectSerial.classList.replace('btn-danger', 'btn-primary');
-      el.btnWatchRemote.textContent = 'Assistir Sala Remota';
       el.btnSimulate.textContent = 'Modo Simulador';
     }
   }
 
   // =========================================================================
-  // 6. GRÁFICO OSCILOSCÓPIO EM CANVAS (60 FPS)
+  // 5. GRÁFICO OSCILOSCÓPIO EM CANVAS (60 FPS)
   // =========================================================================
   function renderChart() {
     const width = el.canvas.width;
@@ -614,27 +458,11 @@
   }
 
   // =========================================================================
-  // 7. EVENTOS DE INTERFACE E UTILITÁRIOS
+  // 6. EVENTOS DE INTERFACE E UTILITÁRIOS
   // =========================================================================
   function setupEventListeners() {
     el.btnConnectSerial.addEventListener('click', connectWebSerial);
     el.btnSimulate.addEventListener('click', toggleSimulator);
-    el.btnWatchRemote.addEventListener('click', toggleWatchRemoteRoom);
-
-    el.btnCopyShareLink.addEventListener('click', async () => {
-      const room = (el.roomInput.value || 'senai-stm32-f103rb').trim();
-      const shareUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(room)}`;
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        const origText = el.btnCopyShareLink.textContent;
-        el.btnCopyShareLink.textContent = 'Link Copiado!';
-        setTimeout(() => {
-          el.btnCopyShareLink.textContent = origText;
-        }, 2000);
-      } catch (_) {
-        prompt('Copie o link abaixo para acessar em tempo real de qualquer lugar:', shareUrl);
-      }
-    });
 
     el.btnToggleLcdColor.addEventListener('click', () => {
       const nextTheme = el.lcdScreen.dataset.theme === 'blue' ? 'green' : 'blue';
@@ -679,9 +507,9 @@
         alert('Nenhuma amostra registrada ainda para exportar.');
         return;
       }
-      const header = 'timestamp_iso,x_g,y_g,z_g,magnitude_g,pitch_deg,roll_deg\n';
+      const header = 'timestamp_iso,x_g,y_g,z_g\n';
       const body = state.recordedRows
-        .map((r) => `${r.timestamp},${r.x},${r.y},${r.z},${r.mag},${r.pitch},${r.roll}`)
+        .map((r) => `${r.timestamp},${r.x},${r.y},${r.z}`)
         .join('\n');
       const blob = new Blob([header + body], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -712,16 +540,6 @@
 
     setupEventListeners();
     requestAnimationFrame(renderChart);
-
-    // Se a URL já vier com ?room=NOME_DA_SALA, entra automaticamente no modo Espectador Remoto!
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-    if (roomParam) {
-      el.roomInput.value = roomParam;
-      setTimeout(() => {
-        toggleWatchRemoteRoom();
-      }, 400);
-    }
   }
 
   window.addEventListener('DOMContentLoaded', init);

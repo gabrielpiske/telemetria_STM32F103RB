@@ -9,9 +9,7 @@ Este documento consolida o contexto completo de hardware, firmware, protocolo se
 O projeto realiza a leitura triaxial ($X, Y, Z$) de um acelerômetro **ADXL345** conectado via barramento **I2C1** a um microcontrolador **STM32F103RBT6 (Placa Nucleo-F103RB)**. Os valores convertidos em unidades de gravidade ($g$) são:
 1. Exibidos localmente em um **Display LCD 16x2 (HD44780 com módulo I2C PCF8574)**;
 2. Transmitidos em tempo real via **Monitor Serial USB (ST-LINK Virtual COM Port / `USART2`)** no formato JSON (`{"x":0.00,"y":0.00,"z":1.00}\r\n`);
-3. Consumidos por uma **Aplicação Web (HTML5 + CSS3 + JavaScript Vanilla)** hospedada na **Vercel**, que permite tanto:
-   - **Conexão Local Direta (Web Serial API):** Leitura direta da porta `COM` via navegador (Chrome, Edge, Opera) em qualquer computador onde o STM32 esteja conectado via USB.
-   - **Monitoramento Remoto em Tempo Real (Broadcast WebSockets / MQTT):** O computador conectado ao STM32 atua como **Host Transmissor** e retransmite os dados em tempo real para um canal seguro (`WSS`), permitindo que **qualquer pessoa em qualquer lugar do mundo** (inclusive pelo celular ou outro PC remoto) acompanhe os dados ao vivo acessando o link da Vercel.
+3. Consumidos por uma **Aplicação Web (HTML5 + CSS3 + JavaScript Vanilla)** hospedada na **Vercel**, que se comunica diretamente com a porta `COM` via **Web Serial API** no navegador (Chrome, Edge ou Opera).
 
 ---
 
@@ -52,7 +50,6 @@ O projeto realiza a leitura triaxial ($X, Y, Z$) de um acelerômetro **ADXL345**
   ```json
   {"x":0.04,"y":-0.02,"z":0.98}
   ```
-- A flag `-u _printf_float` já está habilitada no linker (`Debug/makefile`), permitindo formatação `%.2f` no `snprintf`.
 
 ---
 
@@ -69,31 +66,12 @@ O projeto realiza a leitura triaxial ($X, Y, Z$) de um acelerômetro **ADXL345**
 
 ---
 
-## 5. Arquitetura da Aplicação Web (Hospedagem na Vercel + Tempo Real Global)
+## 5. Estrutura da Aplicação Web (`web/`)
 
-Para atender ao requisito de **hospedar na Vercel** e **permitir acesso em tempo real de qualquer lugar**, a aplicação web na pasta `web/` opera em 3 modos integrados sem exigir manutenção de servidor backend próprio:
-
-```
-┌──────────────────┐   Cabo USB (USART2)    ┌─────────────────────────────────────────┐
-│  STM32F103RB     │ ─────────────────────► │ Navegador no PC da Bancada (Vercel URL) │
-│  + ADXL345 + LCD │   115200 bps (JSON)    │ [Modo 1: Web Serial API + Host Live]    │
-└──────────────────┘                        └───────────────────┬─────────────────────┘
-                                                                │ Publica em Tempo Real
-                                                                │ (MQTT over WSS / TLS)
-                                                                ▼
-                                            ┌─────────────────────────────────────────┐
-                                            │ Broker WebSocket Público (HiveMQ WSS)   │
-                                            │ Tópico: senai/stm32/telemetria/<SALA>   │
-                                            └───────────────────┬─────────────────────┘
-                                                                │ Assina em Tempo Real
-                                                                ▼
-                                            ┌─────────────────────────────────────────┐
-                                            │ Qualquer Pessoa em Qualquer Lugar       │
-                                            │ (Celular, Tablet, outro PC na Vercel)   │
-                                            │ [Modo 2: Espectador Remoto Live]        │
-                                            └─────────────────────────────────────────┘
-```
-
-### Requisitos do Navegador
-- **Para conectar o cabo USB direto (Modo 1 - Web Serial API):** Google Chrome (v89+), Microsoft Edge (v89+) ou Opera em Desktop (Windows, Linux, macOS ou Chromebook) sob HTTPS (`vercel.app` ou `localhost`).
-- **Para assistir remotamente de qualquer lugar (Modo 2 - Espectador Live):** Qualquer navegador moderno em **qualquer dispositivo** (Android, iPhone/iOS, Windows, Mac, Smart TV), bastando abrir o link da sala (`https://seu-app.vercel.app/?room=CODIGO`).
+- **Cabeçalho e Conexão:** Status de conexão, taxa de amostragem (`Hz`), seletor de Baud Rate (`115200 bps` padrão), botão **Conectar STM32 (USB)** via `Web Serial API` e botão **Modo Simulador**.
+- **Cards dos Três Eixos (`X`, `Y`, `Z`):** Exibição em unidades de gravidade ($g$) e em $\text{m/s}^2$, com barra bidirecional de $-4g$ a $+4g$.
+- **Espelho Virtual do Display LCD 16x2 (HD44780 I2C):** Réplica fiel das duas linhas do display físico nas posições `(0,0)`, `(8,0)` e `(5,1)`, com alternância de backlight Azul/Verde e função de Tara (Zero).
+- **Orientação Espacial 3D em Tempo Real:** Placa 3D que rotaciona conforme a inclinação medida pelos eixos X, Y e Z.
+- **Osciloscópio de Aceleração em Tempo Real:** Gráfico temporal contínuo em Canvas para os eixos X, Y e Z.
+- **Monitor Serial Bruto:** Console das mensagens recebidas pela `USART2` com exportação para arquivo `.CSV`.
+- **Rodapé Educativo e Créditos:** Identidade visual institucional SENAI com referência e autoria do Docente **Gabriel Piske** (`https://piske.online`).
